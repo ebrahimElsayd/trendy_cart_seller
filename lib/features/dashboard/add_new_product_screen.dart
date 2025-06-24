@@ -1,149 +1,178 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:trendycart_of_seller/core/comman/entitys/item_model.dart';
+import 'package:trendycart_of_seller/core/comman/entitys/categories.dart';
+import 'package:trendycart_of_seller/features/products/presentation/riverpod/items_riverpod.dart';
+import 'package:trendycart_of_seller/features/products/presentation/riverpod/items_state.dart';
+import 'package:trendycart_of_seller/features/products/data/repository/items_repository.dart';
 import 'package:trendycart_of_seller/features/dashboard/draft_screen.dart';
 
-void main() => runApp(const MyApp());
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(textTheme: GoogleFonts.poppinsTextTheme()),
-      home: const AddProductScreen(),
-    );
-  }
-}
-
-class AddProductScreen extends StatelessWidget {
+class AddProductScreen extends ConsumerStatefulWidget {
   const AddProductScreen({super.key});
 
   @override
+  ConsumerState<AddProductScreen> createState() => _AddProductScreenState();
+}
+
+class _AddProductScreenState extends ConsumerState<AddProductScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _retailPriceController = TextEditingController();
+  final _wholesalePriceController = TextEditingController();
+  final _quantityController = TextEditingController();
+  final _imageUrlController = TextEditingController();
+
+  int _selectedCategoryId = 1;
+  List<Categories> _categories = [];
+  bool _isLoadingCategories = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _retailPriceController.dispose();
+    _wholesalePriceController.dispose();
+    _quantityController.dispose();
+    _imageUrlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      // Load categories from the items data source
+      final itemsNotifier = ref.read(itemsRiverpodProvider.notifier);
+      final repository = ref.read(itemsRepositoryProvider);
+      final result = await repository.itemsDataSource.getCategories();
+
+      setState(() {
+        _categories = result;
+        _isLoadingCategories = false;
+        if (_categories.isNotEmpty) {
+          _selectedCategoryId = _categories.first.id;
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isLoadingCategories = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load categories: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  void _handleAddProduct() {
+    if (_formKey.currentState!.validate()) {
+      final item = ItemModel(
+        name: _nameController.text.trim(),
+        description: _descriptionController.text.trim(),
+        categoryId: _selectedCategoryId,
+        imageUrl: _imageUrlController.text.trim(),
+        quantity: int.tryParse(_quantityController.text) ?? 0,
+        retailPrice: double.tryParse(_retailPriceController.text) ?? 0.0,
+        wholesalePrice: double.tryParse(_wholesalePriceController.text) ?? 0.0,
+        createdAt: DateTime.now().toIso8601String(),
+      );
+
+      ref.read(itemsRiverpodProvider.notifier).addItem(item);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final itemsState = ref.watch(itemsRiverpodProvider);
+
+    // Listen to state changes
+    ref.listen<ItemsState>(itemsRiverpodProvider, (previous, next) {
+      if (next.status == ItemsStateStatus.itemAdded) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Product added successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+      } else if (next.status == ItemsStateStatus.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${next.errorMessage ?? 'Unknown error'}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    });
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F6F6),
-
-      body: SafeArea(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF6F6F6),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'Add New Product',
+          style: GoogleFonts.poppins(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Colors.black,
+          ),
+        ),
+      ),
+      body: Form(
+        key: _formKey,
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Add New Product',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFFBDBDBD),
-                ),
-              ),
-              const SizedBox(height: 12),
               _buildCard(
-                title: 'Name & description',
+                title: 'Product Information',
                 children: [
-                  _buildLabel('Product title'),
+                  _buildLabel('Product Name *'),
                   const SizedBox(height: 8),
-                  const TextField(
-                    decoration: InputDecoration(
-                      hintText: 'Input your text',
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      hintText: 'Enter product name',
                       border: OutlineInputBorder(),
                     ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Product name is required';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 16),
                   _buildLabel('Description'),
                   const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          child: Row(
-                            children: const [
-                              Icon(Icons.format_bold, size: 18),
-                              SizedBox(width: 12),
-                              Icon(Icons.format_italic, size: 18),
-                              SizedBox(width: 12),
-                              Icon(Icons.format_underline, size: 18),
-                              SizedBox(width: 12),
-                              Icon(Icons.emoji_emotions_outlined, size: 18),
-                              SizedBox(width: 12),
-                              Icon(Icons.link, size: 18),
-                              SizedBox(width: 12),
-                              Icon(Icons.format_list_bulleted, size: 18),
-                              SizedBox(width: 12),
-                              Icon(Icons.format_align_left, size: 18),
-                              Spacer(),
-                              Icon(Icons.arrow_back_ios_new, size: 18),
-                              SizedBox(width: 8),
-                              Icon(Icons.arrow_forward_ios, size: 18),
-                            ],
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        const TextField(
-                          maxLines: 6,
-                          decoration: InputDecoration(
-                            contentPadding: EdgeInsets.all(12),
-                            border: InputBorder.none,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _buildCard(
-                title: 'Images & CTA',
-                children: [
-                  _buildLabel('Cover images'),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 120,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                      color: Colors.grey.shade100,
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.cloud_upload_outlined, size: 32),
-                          Text(
-                            'Click or drop image',
-                            style: GoogleFonts.poppins(),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildLabel('Category'),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: 'Purchase now',
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Purchase now',
-                        child: Text('Purchase now'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Pre-order',
-                        child: Text('Pre-order'),
-                      ),
-                    ],
-                    onChanged: (value) {},
+                  TextFormField(
+                    controller: _descriptionController,
+                    maxLines: 4,
                     decoration: const InputDecoration(
+                      hintText: 'Enter product description',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildLabel('Image URL'),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _imageUrlController,
+                    decoration: const InputDecoration(
+                      hintText: 'Enter image URL (optional)',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -151,61 +180,162 @@ class AddProductScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _buildCard(
-                title: 'Price',
+                title: 'Category & Stock',
                 children: [
-                  _buildLabel('Amount'),
+                  _buildLabel('Category *'),
                   const SizedBox(height: 8),
-                  const TextField(
-                    decoration: InputDecoration(
-                      prefixText: '\$ ',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
+                  _isLoadingCategories
+                      ? const CircularProgressIndicator()
+                      : DropdownButtonFormField<int>(
+                        value: _selectedCategoryId,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                        ),
+                        items:
+                            _categories.map((category) {
+                              return DropdownMenuItem(
+                                value: category.id,
+                                child: Text(category.name),
+                              );
+                            }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _selectedCategoryId = value;
+                            });
+                          }
+                        },
+                        validator: (value) {
+                          if (value == null) {
+                            return 'Please select a category';
+                          }
+                          return null;
+                        },
+                      ),
                   const SizedBox(height: 16),
-                  _buildLabel('Discount amount'),
+                  _buildLabel('Quantity *'),
                   const SizedBox(height: 8),
-                  const TextField(
-                    decoration: InputDecoration(
-                      prefixText: '\$ ',
+                  TextFormField(
+                    controller: _quantityController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      hintText: 'Enter quantity in stock',
                       border: OutlineInputBorder(),
                     ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Quantity is required';
+                      }
+                      final quantity = int.tryParse(value);
+                      if (quantity == null || quantity < 0) {
+                        return 'Please enter a valid quantity';
+                      }
+                      return null;
+                    },
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              Text(
-                'Last saved Oct 4, 2021 - 23:32',
-                style: GoogleFonts.poppins(fontSize: 12),
+              _buildCard(
+                title: 'Pricing',
+                children: [
+                  _buildLabel('Retail Price *'),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _retailPriceController,
+                    keyboardType: TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      prefixText: '\$ ',
+                      hintText: '0.00',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Retail price is required';
+                      }
+                      final price = double.tryParse(value);
+                      if (price == null || price < 0) {
+                        return 'Please enter a valid price';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildLabel('Wholesale Price'),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _wholesalePriceController,
+                    keyboardType: TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      prefixText: '\$ ',
+                      hintText: '0.00 (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value != null && value.trim().isNotEmpty) {
+                        final price = double.tryParse(value);
+                        if (price == null || price < 0) {
+                          return 'Please enter a valid wholesale price';
+                        }
+                      }
+                      return null;
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 24),
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => DraftsPage()),
-                        );
-                      },
+                      onPressed:
+                          itemsState.status == ItemsStateStatus.addingItem
+                              ? null
+                              : () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const DraftsPage(),
+                                  ),
+                                );
+                              },
                       child: Text('Save Draft', style: GoogleFonts.poppins()),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () {},
+                      onPressed:
+                          itemsState.status == ItemsStateStatus.addingItem
+                              ? null
+                              : _handleAddProduct,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.black,
+                        disabledBackgroundColor: Colors.grey,
                       ),
-                      child: Text(
-                        'Publish now',
-                        style: GoogleFonts.poppins(color: Colors.white),
-                      ),
+                      child:
+                          itemsState.status == ItemsStateStatus.addingItem
+                              ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                              : Text(
+                                'Add Product',
+                                style: GoogleFonts.poppins(color: Colors.white),
+                              ),
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 20),
             ],
           ),
         ),

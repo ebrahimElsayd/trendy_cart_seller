@@ -1,38 +1,68 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import '../orders/presentation/riverpod/orders_riverpod.dart';
+import '../orders/presentation/riverpod/orders_state.dart';
+import '../products/presentation/riverpod/items_riverpod.dart';
+import '../products/presentation/riverpod/items_state.dart';
 
-class DashboardScreen extends StatefulWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   @override
-  _DashboardScreenState createState() => _DashboardScreenState();
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
-  int totalOrders = 0;
-  int pendingCount = 0;
-  int shippedCount = 0;
-  int deliveredCount = 0;
-
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    fetchOrderData();
-  }
-
-  Future<void> fetchOrderData() async {
-    await Future.delayed(Duration(seconds: 1)); // simulate API call
-    setState(() {
-      totalOrders = 500;
-      pendingCount = 150;
-      shippedCount = 200;
-      deliveredCount = 150;
+    // Load real data when the screen initializes
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(ordersRiverpodProvider.notifier).loadAllData();
+      ref.read(itemsRiverpodProvider.notifier).getAllItems();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    double pendingOrders = totalOrders == 0 ? 0 : pendingCount / totalOrders;
-    double shippedOrders = totalOrders == 0 ? 0 : shippedCount / totalOrders;
+    final ordersState = ref.watch(ordersRiverpodProvider);
+    final itemsState = ref.watch(itemsRiverpodProvider);
+
+    // Get real data from the providers
+    final summary = ordersState.orderSummary;
+    final totalOrders = summary?.totalOrders ?? 0;
+    final preparingCount = summary?.preparingOrders ?? 0;
+    final deliveredCount = summary?.deliveredOrders ?? 0;
+    final cancelledCount = summary?.cancelledOrders ?? 0;
+
+    // Calculate percentages
+    double preparingOrders =
+        totalOrders == 0 ? 0 : preparingCount / totalOrders;
     double deliveredOrders =
         totalOrders == 0 ? 0 : deliveredCount / totalOrders;
+    double cancelledOrders =
+        totalOrders == 0 ? 0 : cancelledCount / totalOrders;
+
+    // Get product count
+    final totalProducts = itemsState.items.length;
+
+    // Calculate total sales from delivered orders
+    final totalSales = ordersState.orders
+        .where((order) => order.orderState.toLowerCase() == 'delivered')
+        .fold<double>(0.0, (sum, order) => sum + order.itemPrice);
+
+    // Calculate growth percentage (placeholder for now)
+    final productGrowth = totalProducts > 0 ? "10%" : "0%";
+    final orderGrowth = totalOrders > 0 ? "15%" : "0%";
+    final salesGrowth = totalSales > 0 ? "12%" : "0%";
+
+    // Show loading state while data is being fetched
+    if (ordersState.status == OrdersStateStatus.loading &&
+        itemsState.status == ItemsStateStatus.loading) {
+      return Scaffold(
+        backgroundColor: Color(0xFFBDBDBD),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Color(0xFFBDBDBD),
@@ -71,8 +101,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: buildInfoCard(
                               icon: Icons.sell,
                               title: "Total Product",
-                              value: "4453",
-                              percentage: "10%",
+                              value: "$totalProducts",
+                              percentage: productGrowth,
                             ),
                           ),
                         ],
@@ -85,28 +115,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: Icons.shopping_cart,
                               title: "Total Orders",
                               value: "$totalOrders",
-                              percentage: "10%",
+                              percentage: orderGrowth,
                             ),
                           ),
                           SizedBox(width: 12),
                           Expanded(
                             child: buildInfoCard(
                               icon: Icons.attach_money,
-                              title: "Total Sell",
-                              value: "\$1200",
-                              percentage: "15%",
+                              title: "Total Sales",
+                              value: "\$${totalSales.toStringAsFixed(0)}",
+                              percentage: salesGrowth,
                             ),
                           ),
                         ],
                       ),
                       SizedBox(height: 16),
                       buildOrderSummary(
-                        pendingOrders,
-                        shippedOrders,
+                        preparingOrders,
                         deliveredOrders,
+                        cancelledOrders,
+                        preparingCount,
+                        deliveredCount,
+                        cancelledCount,
+                        totalOrders,
                       ),
                       SizedBox(height: 16),
-                      buildOrderList(),
+                      buildOrderList(ordersState),
                     ],
                   ),
                 ),
@@ -167,9 +201,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget buildOrderSummary(
-    double pendingOrders,
-    double shippedOrders,
+    double preparingOrders,
     double deliveredOrders,
+    double cancelledOrders,
+    int preparingCount,
+    int deliveredCount,
+    int cancelledCount,
+    int totalOrders,
   ) {
     return Container(
       padding: EdgeInsets.all(16),
@@ -183,29 +221,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Text("Order Summary", style: TextStyle(fontWeight: FontWeight.bold)),
           SizedBox(height: 12),
           buildProgress(
-            "Pending Orders",
-            pendingOrders,
+            "Preparing Orders",
+            preparingOrders,
             Colors.orange,
-            pendingCount,
-          ),
-          buildProgress(
-            "Shipped Orders",
-            shippedOrders,
-            Colors.purple,
-            shippedCount,
+            preparingCount,
+            totalOrders,
           ),
           buildProgress(
             "Delivered Orders",
             deliveredOrders,
             Colors.green,
             deliveredCount,
+            totalOrders,
+          ),
+          buildProgress(
+            "Cancelled Orders",
+            cancelledOrders,
+            Colors.red,
+            cancelledCount,
+            totalOrders,
           ),
         ],
       ),
     );
   }
 
-  Widget buildProgress(String title, double progress, Color color, int count) {
+  Widget buildProgress(
+    String title,
+    double progress,
+    Color color,
+    int count,
+    int totalOrders,
+  ) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -231,7 +278,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget buildOrderList() {
+  Widget buildOrderList(OrdersState ordersState) {
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -241,38 +288,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Order Summary", style: TextStyle(fontWeight: FontWeight.bold)),
+          Text("Recent Orders", style: TextStyle(fontWeight: FontWeight.bold)),
           SizedBox(height: 12),
-          buildOrderRow(
-            "01/04/2024",
-            "airpods pro",
-            "electronics",
-            "P12345",
-            "Tanta,Gharbia",
-            "Canceled",
-            Colors.red,
-          ),
-          buildOrderRow(
-            "01/04/2024",
-            "Nintendo Pro",
-            "electronics",
-            "P12345",
-            "Tanta,Gharbia",
-            "Delivered",
-            Colors.green,
-          ),
-          buildOrderRow(
-            "01/04/2024",
-            "Bose Headphones",
-            "electronics",
-            "P12345",
-            "Tanta,Gharbia",
-            "Pending",
-            Colors.orange,
-          ),
+          if (ordersState.status == OrdersStateStatus.loading)
+            Center(child: CircularProgressIndicator())
+          else if (ordersState.orders.isEmpty)
+            Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  "No orders found",
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+            )
+          else
+            ...ordersState.orders.take(3).map((order) {
+              final formattedDate = DateFormat(
+                'dd/MM/yyyy',
+              ).format(order.orderCreatedAt);
+              Color statusColor;
+              switch (order.orderState.toLowerCase()) {
+                case 'preparing':
+                  statusColor = Colors.orange;
+                  break;
+                case 'delivered':
+                  statusColor = Colors.green;
+                  break;
+                case 'cancelled':
+                  statusColor = Colors.red;
+                  break;
+                default:
+                  statusColor = Colors.grey;
+              }
+
+              return buildOrderRow(
+                formattedDate,
+                order.itemName.isNotEmpty ? order.itemName : "Unknown Product",
+                "Product", // category placeholder
+                order.orderId.length > 6
+                    ? order.orderId.substring(0, 6)
+                    : order.orderId,
+                order.region.isNotEmpty ? order.region : "Unknown Location",
+                _capitalizeFirst(order.orderState),
+                statusColor,
+              );
+            }).toList(),
         ],
       ),
     );
+  }
+
+  String _capitalizeFirst(String text) {
+    if (text.isEmpty) return text;
+    return text[0].toUpperCase() + text.substring(1).toLowerCase();
   }
 
   Widget buildOrderRow(
